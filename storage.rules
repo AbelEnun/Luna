@@ -1,0 +1,48 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isBusinessMember(businessId) {
+      let business = firestore.get(/databases/(default)/documents/businesses/$(businessId)).data;
+      return signedIn()
+        && business.status == "approved"
+        && (
+          business.ownerId == request.auth.uid
+          || (business.staffIds is list && request.auth.uid in business.staffIds)
+        );
+    }
+
+    match /businesses/{businessId}/{file} {
+      allow read: if true;
+      allow write: if isBusinessMember(businessId)
+        && (
+          request.resource == null
+          || (
+            request.resource.size < 8 * 1024 * 1024
+            && request.resource.contentType.matches('image/.*')
+          )
+        );
+    }
+
+    match /support_chats/{businessId}/{file} {
+      allow read: if signedIn();
+      allow write: if signedIn()
+        && (
+          request.resource == null
+          || (
+            request.resource.size < 10 * 1024 * 1024
+            && request.resource.contentType.matches('image/.*')
+          )
+        );
+    }
+
+    // Legacy product files are public but cannot be changed through the client.
+    match /products/{file} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}

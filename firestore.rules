@@ -1,0 +1,242 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return signedIn() && (
+        exists(/databases/$(database)/documents/super_admins/$(request.auth.uid)) ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function businessPath(businessId) {
+      return /databases/$(database)/documents/businesses/$(businessId);
+    }
+
+    function isBusinessMember(businessId) {
+      return signedIn()
+        && exists(businessPath(businessId))
+        && get(businessPath(businessId)).data.status == "approved"
+        && (
+          get(businessPath(businessId)).data.ownerId == request.auth.uid
+          || (
+            get(businessPath(businessId)).data.staffIds is list
+            && request.auth.uid in get(businessPath(businessId)).data.staffIds
+          )
+        );
+    }
+
+    match /super_admins/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isSuperAdmin());
+      allow write: if false;
+    }
+
+    match /admins/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isSuperAdmin());
+      allow write: if false;
+    }
+
+    match /platform_settings/{docId} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+
+    match /businesses/{businessId} {
+      allow read: if true;
+      allow create: if isSuperAdmin() || (
+        signedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.status == "pending"
+        && request.resource.data.staffIds == [request.auth.uid]
+      );
+      allow update: if isSuperAdmin() || (
+        isBusinessMember(businessId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "name", "tagline", "logoUrl", "heroImageUrl", "heroTitle", "aboutText",
+          "currency", "announcement", "accentColor", "phone", "whatsapp",
+          "telegram", "instagram", "email", "address", "openingHours",
+          "upgradeRequested", "upgradeRequestedAt", "updatedAt"
+        ])
+      );
+      allow delete: if isSuperAdmin();
+
+      match /products/{productId} {
+        allow read: if true;
+        allow create, update, delete: if isSuperAdmin() || isBusinessMember(businessId);
+      }
+
+      match /reservations/{reservationId} {
+        allow create: if signedIn()
+          && get(businessPath(businessId)).data.status == "approved"
+          && request.resource.data.customerId == request.auth.uid
+          && request.resource.data.status == "requested"
+          && request.resource.data.keys().hasOnly([
+            "customerId", "customerName", "customerEmail", "productId",
+            "productTitle", "productImage", "productPrice", "size", "note",
+            "status", "createdAt"
+          ])
+          && exists(/databases/$(database)/documents/businesses/$(businessId)/products/$(request.resource.data.productId))
+          && get(/databases/$(database)/documents/businesses/$(businessId)/products/$(request.resource.data.productId)).data.published == true;
+        allow read: if isSuperAdmin()
+          || isBusinessMember(businessId)
+          || (signedIn() && resource.data.customerId == request.auth.uid);
+        allow update: if isSuperAdmin() || (
+          isBusinessMember(businessId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "updatedAt"])
+          && request.resource.data.status in ["requested", "confirmed", "completed", "cancelled"]
+        );
+        allow delete: if isSuperAdmin();
+      }
+
+      match /chats/{chatId} {
+        allow get, list: if isSuperAdmin()
+          || isBusinessMember(businessId)
+          || (signedIn() && chatId == request.auth.uid && resource.data.customerId == request.auth.uid);
+        allow create: if signedIn()
+          && chatId == request.auth.uid
+          && request.resource.data.customerId == request.auth.uid
+          && request.resource.data.keys().hasOnly([
+            "customerId", "customerName", "unreadByBusiness", "unreadByCustomer",
+            "lastMessage", "lastMessageAt"
+          ])
+          && get(businessPath(businessId)).data.status == "approved";
+        allow update: if isSuperAdmin() || (
+          isBusinessMember(businessId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "customerId", "unreadByBusiness", "unreadByCustomer",
+            "lastMessage", "lastMessageAt"
+          ])
+          && request.resource.data.customerId == resource.data.customerId
+        ) || (
+          signedIn()
+          && chatId == request.auth.uid
+          && resource.data.customerId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "customerId", "customerName", "unreadByBusiness", "unreadByCustomer",
+            "lastMessage", "lastMessageAt"
+          ])
+          && request.resource.data.customerId == request.auth.uid
+        );
+        allow delete: if isSuperAdmin();
+
+        match /messages/{messageId} {
+          allow read: if isSuperAdmin()
+            || isBusinessMember(businessId)
+            || (signedIn() && chatId == request.auth.uid);
+          allow create: if request.resource.data.keys().hasOnly([
+              "senderId", "senderRole", "text", "createdAt",
+              "productId", "productTitle", "productImage"
+            ])
+            && request.resource.data.senderId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/businesses/$(businessId)/chats/$(chatId)).data.customerId == chatId
+            && (
+              (isBusinessMember(businessId) && request.resource.data.senderRole == "admin")
+              || (signedIn() && chatId == request.auth.uid && request.resource.data.senderRole == "customer")
+            );
+          allow update, delete: if false;
+        }
+      }
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isSuperAdmin());
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly([
+          "name", "email", "role", "createdAt", "lastSeen",
+          "businessId", "businessSlug", "updatedAt"
+        ])
+        && request.resource.data.role in ["customer", "business_owner", "super_admin"];
+      allow update: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "name", "email", "role", "lastSeen", "businessId", "businessSlug", "updatedAt"
+        ])
+        && request.resource.data.role in ["customer", "business_owner", "super_admin"];
+      allow delete: if isSuperAdmin();
+
+      match /wishlist/{docId} {
+        allow read, delete: if signedIn() && request.auth.uid == uid;
+        allow create, update: if signedIn()
+          && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(["businessId", "productId", "createdAt"])
+          && request.resource.data.productId is string
+          && request.resource.data.businessId is string;
+      }
+    }
+
+    // ── Support chat threads (business owner ↔ super admin) ──────────────
+    // Thread doc lives at support_chats/{businessId}
+    // Messages live at support_chats/{businessId}/messages/{messageId}
+
+    function isBusinessOwner(businessId) {
+      return signedIn()
+        && exists(businessPath(businessId))
+        && (
+          get(businessPath(businessId)).data.ownerId == request.auth.uid
+          || (
+            get(businessPath(businessId)).data.staffIds is list
+            && request.auth.uid in get(businessPath(businessId)).data.staffIds
+          )
+        );
+    }
+
+    match /support_chats/{businessId} {
+      // Owner of that business or super admin can read the thread doc
+      allow read: if isSuperAdmin() || isBusinessOwner(businessId);
+
+      // Owner can create/update the thread doc (to set lastMessage, unreadByAdmin, etc.)
+      // Super admin can update (to mark unreadByAdmin=false, set unreadByOwner, etc.)
+      allow create: if isBusinessOwner(businessId) || isSuperAdmin();
+      allow update: if isBusinessOwner(businessId) || isSuperAdmin();
+      allow delete: if isSuperAdmin();
+
+      match /messages/{messageId} {
+        // Both parties can read messages in their thread
+        allow read: if isSuperAdmin() || isBusinessOwner(businessId);
+
+        // Owner can create messages with senderRole "owner"
+        // Super admin can create messages with senderRole "superadmin"
+        allow create: if (
+          isBusinessOwner(businessId)
+          && request.resource.data.senderRole == "owner"
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.keys().hasOnly([
+            "senderId", "senderRole", "senderName", "text", "imageUrl", "createdAt"
+          ])
+        ) || (
+          isSuperAdmin()
+          && request.resource.data.senderRole == "superadmin"
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.keys().hasOnly([
+            "senderId", "senderRole", "senderName", "text", "imageUrl", "createdAt"
+          ])
+        );
+
+        allow update, delete: if false;
+      }
+    }
+
+    // Legacy single-store collections are no longer used by the active routes.
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /reservations/{reservationId} {
+      allow read, write: if false;
+    }
+    match /chats/{chatId} {
+      allow read, write: if false;
+      match /messages/{messageId} {
+        allow read, write: if false;
+      }
+    }
+  }
+}

@@ -1,0 +1,66 @@
+# ── Dependencies ──────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+
+# ── Build Output ───────────────────────────────────────────
+dist/
+dist-ssr/
+build/
+
+# ── Environment Variables (NEVER commit secrets) ───────────
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.*.local
+
+# ── Firebase ───────────────────────────────────────────────
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+firestore-debug.log
+ui-debug.log
+database-debug.log
+.firebaserc          # optional: keep if you want to share project aliases
+serviceAccountKey.json
+*-service-account*.json
+
+# ── Vite ───────────────────────────────────────────────────
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# ── Logs ───────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ── OS / Editor ────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# VS Code
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# JetBrains / WebStorm
+.idea/
+*.iml
+
+# ── Testing ────────────────────────────────────────────────
+coverage/
+*.lcov
+.nyc_output
+
+# ── Misc ───────────────────────────────────────────────────
+*.local
+*.tsbuildinfo
+.cache/
+.parcel-cache/
